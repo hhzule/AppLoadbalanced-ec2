@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import * as  Key  from 'aws-cdk-lib/aws-kms';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as elbv2Targets from 'aws-cdk-lib/aws-elasticloadbalancingv2-targets';
@@ -76,9 +77,15 @@ export class CdkStack extends cdk.Stack {
     // create a EC2 in private subnet
     // need to create 1 in each avaiability zone , in our case 3 in each azs.
     // and one in public subnet for Explorer with web server , in each azs.
+    
+          // Create instance KeyPair
+          const EC2KeyPair = new ec2.CfnKeyPair(this, 'MyEC2KeyPair', {
+            keyName: 'EC2KeyPair',
+          })
+         cdk.Tags.of(EC2KeyPair).add('Username', 'huma');
     const nodeEc2 = new ec2.Instance(this, "our-instances", {
       vpc,
-      keyName: "My-Custom-keypairName",
+      keyName: EC2KeyPair.keyName,
       vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }),
       machineImage: new ec2.AmazonLinuxImage({
         generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2,
@@ -86,7 +93,8 @@ export class CdkStack extends cdk.Stack {
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
       availabilityZone: vpc.availabilityZones[0],
       role: appServerRole,
-      securityGroup: serviceSG
+      securityGroup: serviceSG,
+      ssmSessionPermissions: true,
     })
 
     nodeEc2.instance.addPropertyOverride("KeyName", "My-key-EC2")
@@ -95,6 +103,10 @@ export class CdkStack extends cdk.Stack {
         //      BastionHost in public subnet
         // **************************************
 
+        const BHKeyPair = new ec2.CfnKeyPair(this, 'BastionInstanceOnEC2', {
+          keyName: 'BastionInstanceOnEC2',
+        })
+       cdk.Tags.of(BHKeyPair).add('Username', 'huma');
         const bastionHostLinux = new ec2.BastionHostLinux(this, 'BastionHostLinux', {  
           vpc: vpc,
           instanceName: "BastionHostLinux",
@@ -105,7 +117,7 @@ export class CdkStack extends cdk.Stack {
           }
         });
 
-        bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "My-key-BH")
+        bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "BastionInstanceOnEC2")
 
         // ***********************************************
         //     ApplicationLoadBalancer in public subnet
@@ -122,7 +134,7 @@ export class CdkStack extends cdk.Stack {
         // internetFacing: true,
         vpcSubnets: vpc.selectSubnets({
           subnetType: ec2.SubnetType.PUBLIC,
-        }),
+        })
       }
     );
 
@@ -136,6 +148,12 @@ export class CdkStack extends cdk.Stack {
       port: 8545, 
       open: false,
       protocol: elbv2.ApplicationProtocol.HTTP,
+      // defaultTargetGroups
+    });
+    const listener3 = loadbalancer.addListener('PublicListener1', { 
+      port: 8545, 
+      open: false,
+      protocol: elbv2.ApplicationProtocol.HTTPS,
       // defaultTargetGroups
     });
 
@@ -156,6 +174,26 @@ export class CdkStack extends cdk.Stack {
           ec2.Port.tcp(8546),
           "Allow all ingress 8546 traffic to be routed to the VPC"
         );
+        listener3.connections.allowFrom(  
+          bastionHostLinux ,
+          ec2.Port.tcp(8545),
+          "Allow all ingress 8545 traffic to be routed to the VPC"
+        );
+        listener1.connections.allowTo(  
+          bastionHostLinux ,
+          ec2.Port.tcp(8545),
+          "Allow all engress 8545 traffic to be routed to the VPC"
+        );
+        listener2.connections.allowTo(
+          bastionHostLinux,
+          ec2.Port.tcp(8546),
+          "Allow all engress 8546 traffic to be routed to the VPC"
+        );
+        listener3.connections.allowTo(  
+          bastionHostLinux ,
+          ec2.Port.tcp(8545),
+          "Allow all engress 8545 traffic to be routed to the VPC"
+        );
 
         const targetGroup = new elbv2.ApplicationTargetGroup(
           this,
@@ -169,15 +207,21 @@ export class CdkStack extends cdk.Stack {
         );
         listener1.addAction("alb-ec2-action", {
           action: elbv2.ListenerAction.forward([targetGroup]),
+          
           // conditions: [elbv2.ListenerCondition.pathPatterns(["/hello"])],
           // priority: 1,/ used with conditions
         });
         listener2.addTargets('EC2-listner2', {
-          port: 8545,
+          port: 8546,
         protocol: elbv2.ApplicationProtocol.HTTP,
         targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
         });
-  
+        listener3.addAction("alb-ec2-action", {
+          action: elbv2.ListenerAction.forward([targetGroup])
+        });
+        listener3.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
+        listener2.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
+        listener1.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
 
       // Attach ALB to Service
       // listener1.addTargets('EC2-listner1', {

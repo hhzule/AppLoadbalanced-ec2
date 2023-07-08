@@ -18,3 +18,74 @@ Stack So Far
 - Load balancer would listen on port [8545, 8546] , only allowed connections from BastionHost(controlled)
 - loadBalancer has target group of ec2 instance inside private subnet.
 - ec2 instancehas webserver listing on port 80 for testing purposes
+
+permissions to attach to the Iam user
+{
+"Version": "2012-10-17",
+"Statement": [
+{
+"Effect": "Allow",
+"Action": [
+"ssm:StartSession"
+],
+"Resource": [
+"arn:aws:ec2:*:{account_id}:instance/*"
+],
+"Condition": {
+"StringLike": {
+"ssm:resourceTag/Name": [
+"BastionHost"
+]
+}
+}
+},
+{
+"Effect": "Allow",
+"Action": [
+"ec2:DescribeInstances",
+"ec2:DescribeImages",
+"ec2:DescribeTags",
+"ec2:DescribeSnapshots"
+],
+"Resource": [
+"*"
+]
+},
+{
+"Effect": "Allow",
+"Action": [
+"ssm:StartSession"
+],
+"Resource": [
+"arn:aws:ssm:*::document/AWS-StartPortForwardingSession",
+"arn:aws:ssm:*::document/AWS-StartSSHSession"
+]
+},
+{
+"Effect": "Allow",
+"Action": [
+"ssm:TerminateSession"
+],
+"Resource": [
+"arn:aws:ssm:*:*:session/${aws:username}-*"
+]
+},
+{
+"Effect": "Allow",
+"Action": [
+"secretsmanager:GetSecretValue",
+"secretsmanager:DescribeSecret",
+"secretsmanager:ListSecretVersionIds",
+"secretsmanager:ListSecrets"
+],
+"Resource": [
+"arn:aws:secretsmanager:*:{account_id}:secret:*"
+],
+"Condition": {
+"StringEquals": {
+"secretsmanager:ResourceTag/{tag_key}": "{tag_value}"
+}
+}
+}
+]
+}

@@ -116,7 +116,7 @@ export class CdkStack extends cdk.Stack {
             subnetType: ec2.SubnetType.PUBLIC
           }
         });
-
+        bastionHostLinux.allowSshAccessFrom(ec2.Peer.anyIpv4())
         bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "BastionInstanceOnEC2")
 
         // ***********************************************
@@ -150,12 +150,6 @@ export class CdkStack extends cdk.Stack {
       protocol: elbv2.ApplicationProtocol.HTTP,
       // defaultTargetGroups
     });
-    const listener3 = loadbalancer.addListener('PublicListener1', { 
-      port: 8545, 
-      open: false,
-      protocol: elbv2.ApplicationProtocol.HTTPS,
-      // defaultTargetGroups
-    });
 
     const listener2 = loadbalancer.addListener('PublicListener2', { 
       port: 8546, 
@@ -174,11 +168,6 @@ export class CdkStack extends cdk.Stack {
           ec2.Port.tcp(8546),
           "Allow all ingress 8546 traffic to be routed to the VPC"
         );
-        listener3.connections.allowFrom(  
-          bastionHostLinux ,
-          ec2.Port.tcp(8545),
-          "Allow all ingress 8545 traffic to be routed to the VPC"
-        );
         listener1.connections.allowTo(  
           bastionHostLinux ,
           ec2.Port.tcp(8545),
@@ -188,11 +177,6 @@ export class CdkStack extends cdk.Stack {
           bastionHostLinux,
           ec2.Port.tcp(8546),
           "Allow all engress 8546 traffic to be routed to the VPC"
-        );
-        listener3.connections.allowTo(  
-          bastionHostLinux ,
-          ec2.Port.tcp(8545),
-          "Allow all engress 8545 traffic to be routed to the VPC"
         );
 
         const targetGroup = new elbv2.ApplicationTargetGroup(
@@ -216,10 +200,6 @@ export class CdkStack extends cdk.Stack {
         protocol: elbv2.ApplicationProtocol.HTTP,
         targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
         });
-        listener3.addAction("alb-ec2-action", {
-          action: elbv2.ListenerAction.forward([targetGroup])
-        });
-        listener3.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
         listener2.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
         listener1.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
 
@@ -256,9 +236,9 @@ export class CdkStack extends cdk.Stack {
       new cdk.CfnOutput(this, 'PushSshKeyCommand', { value: pushSshKeyCommand });
       new cdk.CfnOutput(this, 'SshCommand', { value: sshCommand});
       new cdk.CfnOutput(this, 'BastioInstanceId', { value: bastionHostLinux.instanceId});
-      // new cdk.CfnOutput(this, 'LoadBalancerDNS', {
-      //   value: loadbalancer.loadBalancerDnsName,
-      // });
+      new cdk.CfnOutput(this, 'LoadBalancerDNS', {
+        value: loadbalancer.loadBalancerDnsName,
+      });
 
   }
 }

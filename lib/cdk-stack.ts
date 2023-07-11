@@ -15,7 +15,6 @@ export class CdkStack extends cdk.Stack {
       // *****************************************
       const vpc = new ec2.Vpc(this, "alb-lambda-vpc", {
             maxAzs: 2,
-            // ipAddresses: [],
             natGateways: 1,
             subnetConfiguration: [
               {
@@ -31,7 +30,7 @@ export class CdkStack extends cdk.Stack {
             ],
           });
           
-      vpc.addFlowLog('FlowLogHuma')
+          vpc.addFlowLog('FlowLogHuma')
   
 
       // **************************************
@@ -45,11 +44,10 @@ export class CdkStack extends cdk.Stack {
          securityGroupName: 'BastionSecurityGroup'
         });
    
-       // serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22), 'SSH access'); not required with session manager
-     serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22))
+      serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(22))
       serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(80))
-       serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8545))
-        serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8546))
+      serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8545))
+      serviceSG.addIngressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(8546))
     
 
       // **************************************
@@ -57,12 +55,7 @@ export class CdkStack extends cdk.Stack {
       // **************************************
 
       const appServerRole = new iam.Role(this, "AppServerRole", {
-        assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
-        // managedPolicies: [
-        //   iam.ManagedPolicy.fromAwsManagedPolicyName(
-        //     "service-role/AmazonECSTaskExecutionRolePolicy"// need to find apt one
-        //   ),
-        // ],
+        assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com")
       });
 
       appServerRole.addToPolicy(new iam.PolicyStatement({
@@ -109,7 +102,7 @@ export class CdkStack extends cdk.Stack {
         });
         bastionHostLinux.allowSshAccessFrom(ec2.Peer.anyIpv4())
         bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "BastionKeyPair")
-        // bastionHostLinux.
+      
         // ***********************************************
         //     ApplicationLoadBalancer in public subnet
         // ***********************************************
@@ -120,26 +113,23 @@ export class CdkStack extends cdk.Stack {
         vpc,
         loadBalancerName: "albino",
         securityGroup:serviceSG,
-        // http2Enabled: true,
-        // securityGroup: serviceSG.securityGroupId,
-        // internetFacing: true,
+        // internetFacing: false, // defaults to false
         vpcSubnets: vpc.selectSubnets({
           subnetType: ec2.SubnetType.PUBLIC,
         })
       }
     );
 
-    // If this is specified, the load balancer will be opened up to anyone who can reach it.
+    // the load balancer will be opened up to anyone who can reach it.
     //  For internal load balancers this is anyone in the same VPC.
     //  For public load balancers, this is anyone on the internet.
     // If you want to be more selective about who can access this 
-    // load balancer, set this to false and use the listener's connections
+    // load balancer,use the listener's connections
 
     const listener1 = loadbalancer.addListener('PublicListener1', { 
       port: 8545, 
       open: false,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      // defaultTargetGroups
     });
 
     const listener2 = loadbalancer.addListener('PublicListener2', { 
@@ -147,7 +137,7 @@ export class CdkStack extends cdk.Stack {
       open: false ,
       protocol: elbv2.ApplicationProtocol.HTTP,
     });
-        // listener1.connections.allowInternally   
+      
   
         listener1.connections.allowFrom(  
           bastionHostLinux ,
@@ -159,16 +149,16 @@ export class CdkStack extends cdk.Stack {
           ec2.Port.tcp(8546),
           "Allow all ingress 8546 traffic to be routed to the VPC"
         );
-        listener1.connections.allowTo(  
-          bastionHostLinux ,
-          ec2.Port.tcp(8545),
-          "Allow all engress 8545 traffic to be routed to the VPC"
-        );
-        listener2.connections.allowTo(
-          bastionHostLinux,
-          ec2.Port.tcp(8546),
-          "Allow all engress 8546 traffic to be routed to the VPC"
-        );
+        // listener1.connections.allowTo(  
+        //   bastionHostLinux ,
+        //   ec2.Port.tcp(8545),
+        //   "Allow all engress 8545 traffic to be routed to the VPC"
+        // );
+        // listener2.connections.allowTo(
+        //   bastionHostLinux,
+        //   ec2.Port.tcp(8546),
+        //   "Allow all engress 8546 traffic to be routed to the VPC"
+        // );
 
         // **************************************
         //     Method 1
@@ -182,7 +172,7 @@ export class CdkStack extends cdk.Stack {
             targetType: elbv2.TargetType.INSTANCE,
             targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)],
             port:80,
-            // protocol: elbv2.ApplicationProtocol.HTTP,
+            protocol: elbv2.ApplicationProtocol.HTTP,
             // protocolVersion: elbv2.ApplicationProtocolVersion.GRPC,
             // healthCheck: {
             //   enabled: true,
@@ -191,38 +181,33 @@ export class CdkStack extends cdk.Stack {
           }
         );
         
-        listener1.addAction("alb-ec2-action", {
+        listener1.addAction("alb-ec2-action1", {
           action: elbv2.ListenerAction.forward([targetGroup]), 
-          // conditions: [elbv2.ListenerCondition.pathPatterns(["/hello"])],
-          // priority: 1,/ used with conditions
         });
+        listener2.addAction("alb-ec2-action2", {
+          action: elbv2.ListenerAction.forward([targetGroup]), 
+        });
+
 
 
         // **************************************
         //     Method 2
         // **************************************
-        listener2.addTargets('EC2-listner2', {
-        port: 8546,
-        protocol: elbv2.ApplicationProtocol.HTTP,
-        targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
-           // include health check (default is none)
-        // healthCheck: {
-        //   interval: cdk.Duration.seconds(60),
-        //   path: "/health",
-        //   timeout: cdk.Duration.seconds(5),
-        // }
-        });
+        // listener2.addTargets('EC2-listner2', {
+        // port: 8546,
+        // protocol: elbv2.ApplicationProtocol.HTTP,
+        // targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
+        //    // include health check (default is none)
+        // // healthCheck: {
+        // //   interval: cdk.Duration.seconds(60),
+        // //   path: "/health",
+        // //   timeout: cdk.Duration.seconds(5),
+        // // }
+        // });
 
-        listener2.addAction("alb-ec2-action2", {
-          action: elbv2.ListenerAction.forward([targetGroup])
-        });
-
-    //  serviceSG.connections.allowFrom(loadbalancer, ec2.Port.tcp(80));// no need for this as we have added listener
-
-    // const connections = new ec2.Connections({
-    //   securityGroups: [serviceSG],
-    //   defaultPort: ec2.Port.tcp(443), // Control Plane has an HTTPS API
-    // });
+        // listener2.addAction("alb-ec2-action2", {
+        //   action: elbv2.ListenerAction.forward([targetGroup])
+        // });
 
       // **************************************
       //              Outputs

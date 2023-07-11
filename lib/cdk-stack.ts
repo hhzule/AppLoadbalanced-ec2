@@ -32,6 +32,7 @@ export class CdkStack extends cdk.Stack {
           });
           
       vpc.addFlowLog('FlowLogHuma')
+  
 
       // **************************************
       //  Security group can receive traffic from internet on given ports
@@ -78,14 +79,8 @@ export class CdkStack extends cdk.Stack {
     // need to create 1 in each avaiability zone , in our case 3 in each azs.
     // and one in public subnet for Explorer with web server , in each azs.
     
-          // Create instance KeyPair
-          const EC2KeyPair = new ec2.CfnKeyPair(this, 'MyEC2KeyPair', {
-            keyName: 'EC2KeyPair',
-          })
-         cdk.Tags.of(EC2KeyPair).add('Username', 'huma');
     const nodeEc2 = new ec2.Instance(this, "our-instances", {
       vpc,
-      keyName: EC2KeyPair.keyName,
       vpcSubnets: vpc.selectSubnets({ subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS }),
       machineImage: new ec2.AmazonLinuxImage({
         generation: ec2.AmazonLinuxGeneration.AMAZON_LINUX_2,
@@ -97,16 +92,12 @@ export class CdkStack extends cdk.Stack {
       ssmSessionPermissions: true,
     })
 
-    nodeEc2.instance.addPropertyOverride("KeyName", "My-key-EC2")
+    nodeEc2.instance.addPropertyOverride("KeyName", "EC2KeyPair")
 
         // **************************************
         //      BastionHost in public subnet
         // **************************************
 
-        const BHKeyPair = new ec2.CfnKeyPair(this, 'BastionInstanceOnEC2', {
-          keyName: 'BastionInstanceOnEC2',
-        })
-       cdk.Tags.of(BHKeyPair).add('Username', 'huma');
         const bastionHostLinux = new ec2.BastionHostLinux(this, 'BastionHostLinux', {  
           vpc: vpc,
           instanceName: "BastionHostLinux",
@@ -117,8 +108,8 @@ export class CdkStack extends cdk.Stack {
           }
         });
         bastionHostLinux.allowSshAccessFrom(ec2.Peer.anyIpv4())
-        bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "BastionInstanceOnEC2")
-
+        bastionHostLinux.instance.instance.addPropertyOverride("KeyName", "BastionKeyPair")
+        // bastionHostLinux.
         // ***********************************************
         //     ApplicationLoadBalancer in public subnet
         // ***********************************************
@@ -179,6 +170,10 @@ export class CdkStack extends cdk.Stack {
           "Allow all engress 8546 traffic to be routed to the VPC"
         );
 
+        // **************************************
+        //     Method 1
+        // **************************************
+
         const targetGroup = new elbv2.ApplicationTargetGroup(
           this,
           "alb-ec2-target-group",
@@ -186,36 +181,41 @@ export class CdkStack extends cdk.Stack {
             vpc,
             targetType: elbv2.TargetType.INSTANCE,
             targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)],
-            port:80
+            port:80,
+            // protocol: elbv2.ApplicationProtocol.HTTP,
+            // protocolVersion: elbv2.ApplicationProtocolVersion.GRPC,
+            // healthCheck: {
+            //   enabled: true,
+            //   healthyGrpcCodes: '0-99',
+            // },
           }
         );
+        
         listener1.addAction("alb-ec2-action", {
-          action: elbv2.ListenerAction.forward([targetGroup]),
-          
+          action: elbv2.ListenerAction.forward([targetGroup]), 
           // conditions: [elbv2.ListenerCondition.pathPatterns(["/hello"])],
           // priority: 1,/ used with conditions
         });
+
+
+        // **************************************
+        //     Method 2
+        // **************************************
         listener2.addTargets('EC2-listner2', {
-          port: 8546,
+        port: 8546,
         protocol: elbv2.ApplicationProtocol.HTTP,
         targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
+           // include health check (default is none)
+        // healthCheck: {
+        //   interval: cdk.Duration.seconds(60),
+        //   path: "/health",
+        //   timeout: cdk.Duration.seconds(5),
+        // }
         });
-        listener2.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
-        listener1.applyRemovalPolicy( cdk.RemovalPolicy.DESTROY)
 
-      // Attach ALB to Service
-      // listener1.addTargets('EC2-listner1', {
-      //   port: 8545,
-      // protocol: elbv2.ApplicationProtocol.HTTP,
-      // targets: [new elbv2Targets.InstanceTarget(nodeEc2, 80)]
-      //   // include health check (default is none)
-      //   // healthCheck: {
-      //   //   interval: cdk.Duration.seconds(60),
-      //   //   path: "/health",
-      //   //   timeout: cdk.Duration.seconds(5),
-      //   // }
-      // });
-
+        listener2.addAction("alb-ec2-action2", {
+          action: elbv2.ListenerAction.forward([targetGroup])
+        });
 
     //  serviceSG.connections.allowFrom(loadbalancer, ec2.Port.tcp(80));// no need for this as we have added listener
 
@@ -227,14 +227,6 @@ export class CdkStack extends cdk.Stack {
       // **************************************
       //              Outputs
       // **************************************
-      const profile = this.node.tryGetContext('profile');
-      const createSshKeyCommand = 'ssh-keygen -t rsa -f my_rsa_key';
-      const pushSshKeyCommand = `aws ec2-instance-connect send-ssh-public-key --region ${cdk.Aws.REGION} --instance-id ${bastionHostLinux.instanceId} --availability-zone ${bastionHostLinux.instanceAvailabilityZone} --instance-os-user ec2-user --ssh-public-key file://my_rsa_key.pub ${profile ? `--profile ${profile}` : ''}`;
-      const sshCommand = `ssh -o "IdentitiesOnly=yes" -i my_rsa_key ec2-user@${bastionHostLinux.instancePublicDnsName}`;
-          
-      new cdk.CfnOutput(this, 'CreateSshKeyCommand', { value: createSshKeyCommand });
-      new cdk.CfnOutput(this, 'PushSshKeyCommand', { value: pushSshKeyCommand });
-      new cdk.CfnOutput(this, 'SshCommand', { value: sshCommand});
       new cdk.CfnOutput(this, 'BastioInstanceId', { value: bastionHostLinux.instanceId});
       new cdk.CfnOutput(this, 'LoadBalancerDNS', {
         value: loadbalancer.loadBalancerDnsName,
